@@ -65,3 +65,10 @@ int server_socket_init(const char *portstr, struct sockaddr_in *addr4){
 
     return 0;
 }
+
+void gera_id(char id[11]){
+    for (int i = 0; i < 10; i++){
+        id[i] = '0' + (rand() % 10); 
+    }
+    id[10] = '\0';
+}

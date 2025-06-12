@@ -6,8 +6,8 @@ SRCS = common.c
 
 all: server sensor
 
-server: server.c common.c $(HDRS)
-	$(CC) $(CFLAGS) -o server server.c common.c
+server: server2.c common.c $(HDRS)
+	$(CC) $(CFLAGS) -o server server2.c common.c
 
 sensor: sensor.c common.c $(HDRS)
 	$(CC) $(CFLAGS) -o sensor sensor.c common.c
