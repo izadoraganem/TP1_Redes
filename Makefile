@@ -4,15 +4,15 @@ CFLAGS = -g
 HDRS = common.h
 SRCS = common.c
 
-all: server sensor
+all: server client
 
-server: server2.c common.c $(HDRS)
-	$(CC) $(CFLAGS) -o server server2.c common.c
+server: server.c common.c $(HDRS)
+	$(CC) $(CFLAGS) -o server server.c common.c
 
-sensor: sensor.c common.c $(HDRS)
-	$(CC) $(CFLAGS) -o sensor sensor.c common.c
+client: client.c common.c $(HDRS)
+	$(CC) $(CFLAGS) -o client client.c common.c
 
 clean:
-	rm -f server sensor *.o
+	rm -f server client *.o
 
 .PHONY: all clean

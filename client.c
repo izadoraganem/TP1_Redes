@@ -34,8 +34,9 @@ char id[11];
 fd_set read_fds;
 int max_fd;
 
-
+//conexao com o servidor
 void conexao(const char *ip, const int porta, char *id){
+    //conexao com SL
     if(porta == 60000){
         s_SL = socket(AF_INET, SOCK_STREAM, 0);
         if(s_SL == -1){
@@ -71,6 +72,7 @@ void conexao(const char *ip, const int porta, char *id){
         }
     }
 
+    //conexao com ss
     if(porta == 61000){
         s_SS = socket(AF_INET, SOCK_STREAM, 0);
         if(s_SS == -1){
@@ -107,9 +109,11 @@ void conexao(const char *ip, const int porta, char *id){
     }
 }
 
+//comunicacao com o servidor
 void comunicacao(char *input){
     int command_code = get_command_code(input);
 
+    //status do sensor
     switch (command_code){
         case 1: {
             char req[BUFFER_SIZE];
@@ -131,7 +135,7 @@ void comunicacao(char *input){
                     case '8': case '9': case 'A': alerta = "Oeste"; break;
                     default: alerta = "Sem área definida"; break;
                 }
-                printf("Alert received from location: %s (%s)\n", &resposta[1], alerta);
+                printf("Alert received from location: %s (%s)\n", &resposta[2], alerta);
             }
             else if((unsigned char)resposta[0] == ERROR){
                 logexit("Sensor not found");
@@ -140,7 +144,7 @@ void comunicacao(char *input){
                 printf("Status do sensor 0\n");
             break;
         }
-
+        //lista de sensores na mesma localizacao
         case 2: {
             char req[BUFFER_SIZE];
             memset(req, 0, sizeof(req));
@@ -161,6 +165,7 @@ void comunicacao(char *input){
             break;
         }
 
+        //localizacao do sensor
         case 3: {
             char req[BUFFER_SIZE];
             memset(req, 0, sizeof(req));
@@ -216,6 +221,7 @@ int main(int argc, char **argv){
             logexit("select");
         }
         
+        //kill recebido do terminal -> encerra as conexoes
         if(FD_ISSET(STDIN_FILENO, &read_fds)){
             char input[BUFFER_SIZE];
             memset(input, 0, sizeof(input));
@@ -243,7 +249,7 @@ int main(int argc, char **argv){
                 else{
                     logexit("Sensor not found");
                 }
-            }else{ //troca de mensagens e funcoes
+            }else{ //troca de mensagens com o servidor
 
             comunicacao(input);
             continue;

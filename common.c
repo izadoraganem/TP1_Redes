@@ -14,13 +14,14 @@ void logexit(const char *msg){
     exit(EXIT_FAILURE);
 }
 
+//funcao que retirei do aula do italo
 void usage(const char *progname){
     fprintf(stderr, "Uso: %s <ip> <porta_cliente> <porta_peer>\n", progname);
     fprintf(stderr, "Exemplo: %s 127.0.0.1 6000 6100\n", progname);
     exit(EXIT_FAILURE);
 }
 
-//inicializa endereço IPV4 
+//inicializa endereço IPV4 (aula do italo)
 int addrparse(const char *ip_str, const char *port_str, struct sockaddr_in *addr){
     if(ip_str == NULL || port_str == NULL){
         return -1;
@@ -38,7 +39,7 @@ int addrparse(const char *ip_str, const char *port_str, struct sockaddr_in *addr
     return 0;
 }
 
-//printa o endereço
+//printa o endereço (aula do italo)
 int addrtostr(const struct sockaddr *addr, char *str, size_t strsize){
     if(addr == NULL || str == NULL) return -1;
 
@@ -57,7 +58,7 @@ int addrtostr(const struct sockaddr *addr, char *str, size_t strsize){
     return 0;
 }
 
-//inicializa o socket do servidor
+//inicializa o socket do servidor (aula do italo)
 int server_socket_init(const char *portstr, struct sockaddr_in *addr4){
     uint16_t port = (uint16_t)atoi(portstr);
     if(port == 0){
@@ -72,6 +73,7 @@ int server_socket_init(const char *portstr, struct sockaddr_in *addr4){
     return 0;
 }
 
+//funcao que gera os ids com 10 numerais
 void gera_id(char id[11]){
     for (int i = 0; i < 10; i++){
         id[i] = '0' + (rand() % 10); 
@@ -79,6 +81,7 @@ void gera_id(char id[11]){
     id[10] = '\0';
 }
 
+//identifica o tipo de comando do terminal
 int get_command_code(const char* buffer){
     if(strcmp(buffer, "Check failure\n") == 0) return 1;
     if(strncmp(buffer, "diagnose\n", 8) == 0) return 2;
