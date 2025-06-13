@@ -109,21 +109,18 @@ void conexao(const char *ip, const int porta, char *id){
 
 void comunicacao(char *input){
     int command_code = get_command_code(input);
-    printf("[DEBUG] Comando recebido: %s (code %d)\n", input, command_code);
 
     switch (command_code){
         case 1: {
-            printf("[DEBUG] Solicitando status do sensor ao SS\n");
             char req[BUFFER_SIZE];
             memset(req, 0, sizeof(req));
-            req[0] = REQ_DISCSEN;
+            req[0] = REQ_SENSSTATUS;
             strcpy(&req[1], id);  
             send(s_SS, req, sizeof(req), 0);
 
             char resposta[BUFFER_SIZE];
             memset(resposta, 0, sizeof(resposta));
             recv(s_SS, resposta, sizeof(resposta), 0);
-            printf("[DEBUG] Resposta do SS: %d | Dados: %s\n", resposta[0], &resposta[1]);
 
             if((unsigned char)resposta[0] == RES_SENSSTATUS){
                 char *alerta;
@@ -140,46 +137,40 @@ void comunicacao(char *input){
                 logexit("Sensor not found");
             }
             else if((unsigned char)resposta[0] == OK)
-                printf("Status do sensor 0");
+                printf("Status do sensor 0\n");
             break;
         }
 
         case 2: {
-            char* locid = input + 9; 
-            printf("[DEBUG] Solicitando sensores da localização %s ao SL\n", locid);
             char req[BUFFER_SIZE];
             memset(req, 0, sizeof(req));
             req[0] = REQ_LOCLIST;
-            strncpy(&req[1], locid, 10);
+            strncpy(&req[1], id, 10);
             send(s_SL, req, sizeof(req), 0); 
 
             char resposta[BUFFER_SIZE];
             memset(resposta, 0, sizeof(resposta));
             recv(s_SL, resposta, sizeof(resposta), 0);
-            printf("[DEBUG] Resposta do SL: %d | Dados: %s\n", resposta[0], &resposta[1]);
 
             if((unsigned char) resposta[0] == ERROR){
                 logexit("Location not found");
             }
             else if((unsigned char) resposta[0] == RES_LOCLIST){
-                printf("%s\n", &resposta[1]);
+                printf("Sensors at Location %d : %s\n", resposta[1] ,&resposta[2]);
             }
             break;
         }
 
         case 3: {
-            char* senids = input + 7;
-            printf("[DEBUG] Solicitando localização do sensor %s ao SL\n", senids);
             char req[BUFFER_SIZE];
             memset(req, 0, sizeof(req));
             req[0] = REQ_SENSLOC;
-            strncpy(&req[1], senids, 10);
+            strncpy(&req[1], id, 10);
             send(s_SL, req, sizeof(req), 0);
 
             char resposta[BUFFER_SIZE];
             memset(resposta, 0, sizeof(resposta));
             recv(s_SL, resposta, sizeof(resposta), 0);
-            printf("[DEBUG] Resposta do SL: %d | Dados: %s\n", resposta[0], &resposta[1]);
 
             if((unsigned char) resposta[0] == ERROR)
                 printf("Sensor not found\n");
@@ -253,6 +244,7 @@ int main(int argc, char **argv){
                     logexit("Sensor not found");
                 }
             }else{ //troca de mensagens e funcoes
+
             comunicacao(input);
             continue;
             }

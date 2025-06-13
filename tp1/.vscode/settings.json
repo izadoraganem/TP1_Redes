@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "*.embeddedhtml": "html",
+        "versao_1": "c",
+        "types.h": "c",
+        "unistd.h": "c"
+    }
+}

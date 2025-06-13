@@ -40,6 +40,7 @@ int listen_s;
 char PidSi[11];
 char PidSj[11];
 int tipo_servidor;
+int client_socket;
 
 typedef struct{
     int socket;         
@@ -63,23 +64,142 @@ int verify(const char *id){
     return 0; 
 }
 
+void requisicoes(char *requisicao_cliente, int i){
 
+    if ((unsigned char)requisicao_cliente[0] == REQ_SENSSTATUS) {
+        int status = -1;
+        printf("REQ_SENSSTATUS %s\n", &requisicao_cliente[1]);
+
+        if (verify(&requisicao_cliente[1])){
+            for (int j = 0; j < clientes; j++) {
+                if (sensores[j] && strcmp(sensores[j]->id_cliente, &requisicao_cliente[1]) == 0) {
+                    status = sensores[j]->risco;
+                    break;
+                }
+            }
+        } 
+
+        switch (status) {
+            char resposta[BUFFER_SIZE];
+
+            case 0:
+                memset(resposta, 0, sizeof(resposta));
+                resposta[0] = OK;
+                strcpy(&resposta[1], &requisicao_cliente[1]);
+                send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+                break;
+
+            case 1:
+                memset(resposta, 0, sizeof(resposta));
+                resposta[0] = REQ_CHECKALERT;
+                strcpy(&resposta[1], &requisicao_cliente[1]);
+                send(socket_1, resposta, sizeof(resposta), 0);
+                printf("Sending REQ_CHECKALERT %s to SL\n", &requisicao_cliente[1]);
+
+                memset(resposta, 0, sizeof(resposta));
+                int r = recv(s, resposta, sizeof(resposta), 0);
+
+                //envia para o cliente a resposta
+                if ((unsigned char)resposta[0] == RES_CHECKALERT){
+                    send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+                } else if ((unsigned char)resposta[0] == ERROR){
+                    send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+                }
+                break;
+
+            case -1:
+                printf("[DEBUG] Cliente não encontrado na lista de sensores\n");
+                memset(resposta, 0, sizeof(resposta));
+                resposta[0] = (unsigned char)ERROR;
+                strcpy(&resposta[1], "10");
+                send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+                break;
+        }
+
+    } else if ((unsigned char)requisicao_cliente[0] == REQ_LOCLIST) {
+        int temp_loc = sensores[i]->local;
+        
+        printf("REQ_LOCLIST %d\n", temp_loc);
+
+       char list[BUFFER_SIZE] = {0};
+
+        for (int j = 0; j < clientes; j++) {
+            if (sensores[j] && sensores[j]->local == temp_loc) {
+                if (strlen(list) > 0) strcat(list, ", ");
+                strcat(list, sensores[j]->id_cliente); // id_cliente já é string
+            }
+        }
+
+        char resposta[BUFFER_SIZE];
+        memset(resposta, 0, sizeof(resposta));
+
+        if (strlen(list) == 0) {
+            resposta[0] = (unsigned char)ERROR;
+            strcpy(&resposta[1], "11");
+        } else {
+            resposta[0] = RES_LOCLIST;
+            resposta[1] = temp_loc;  // você deve usar isso **antes** da lista
+            strcpy(&resposta[2], list); // a lista entra a partir do índice 2
+        }
+
+
+        send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+
+    } else if ((unsigned char)requisicao_cliente[0] == REQ_SENSLOC) {
+        printf("REQ_SENSLOC %s\n", &requisicao_cliente[1]);
+        int found = verify(&requisicao_cliente[1]);
+
+        char resposta[BUFFER_SIZE];
+        memset(resposta, 0, sizeof(resposta));
+
+        if (found == 1) {
+            resposta[0] = RES_SENSLOC;
+            char buffer[16];
+            sprintf(buffer, "%d", sensores[i]->local);
+            strcpy(&resposta[1], buffer);
+        } else {
+            resposta[0] = (unsigned char)ERROR;
+            strcpy(&resposta[1], "10");
+        }
+
+        send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+
+    } else if ((unsigned char)requisicao_cliente[0] == REQ_DISCSEN) {
+        int found = verify(&requisicao_cliente[1]);
+        char resposta[BUFFER_SIZE];
+        memset(resposta, 0, sizeof(resposta));
+
+        if (found == 0) {
+            resposta[0] = (unsigned char)ERROR;
+            resposta[1] = 10;
+        } else {
+            resposta[0] = OK;
+            
+            printf("Client %s removed\n", sensores[i]->id_cliente);
+        
+
+            close(sensores[i]->socket);
+            sensores[i]->socket = -1;
+            clientes--;
+            sensores[i] = sensores[clientes];
+        }
+
+        send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+    } else {
+        printf("[DEBUG] Código de requisição desconhecido: %d\n", (unsigned char)requisicao_cliente[0]);
+    }
+}
 void cliente_servidor(const char *ip, const char *porta_cliente){
-    struct sockaddr_in addr4; //IPV4
+    struct sockaddr_in addr4; // IPV4
     fd_set read_fds;
     int max_fd;
 
-    //inicializa o ipv4
+    // inicializa o ipv4
     if(addrparse(ip, porta_cliente, &addr4) != 0){
         logexit("addrparse");
     }
 
-    //chama a função que inicializa o socket do servidor
-    if(server_socket_init(porta_cliente, &addr4) != 0){
-        logexit("server_socket_init");
-    }  
-
-    //cria o socket do servidor
+    // cria o socket do servidor
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == -1) {
         logexit("socket");
@@ -89,7 +209,7 @@ void cliente_servidor(const char *ip, const char *porta_cliente){
         logexit("bind");
     }
 
-    //fica esperando a conexão dos clientes
+    // fica esperando conexões
     if(listen(s, MAX_CLIENTES) != 0){
         logexit("listen");
     }
@@ -101,34 +221,48 @@ void cliente_servidor(const char *ip, const char *porta_cliente){
 
         max_fd = s > STDIN_FILENO ? s : STDIN_FILENO;
 
+        // adiciona os sensores conectados
+        for(int i = 0; i < clientes; i++){
+            FD_SET(sensores[i]->socket, &read_fds);
+            if(sensores[i]->socket > max_fd){
+                max_fd = sensores[i]->socket;
+            }
+        }
+
+        // espera por atividade
         if(select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0){
             logexit("select");
         }
 
-        //pode dar kill enquanto escuta
+        // comando kill no terminal
         if(FD_ISSET(STDIN_FILENO, &read_fds)){
             char buffer[BUFFER_SIZE];
             memset(buffer, 0, sizeof(buffer));
             fgets(buffer, sizeof(buffer), stdin);
-
             buffer[strcspn(buffer, "\n")] = 0;
+
             if(strcmp(buffer, "kill") == 0){
                 close(s);
+                for(int i = 0; i < clientes; i++) {
+                    close(sensores[i]->socket);
+                    free(sensores[i]);
+                }
                 exit(0);
             }
         }
 
+        // nova conexão
         if(FD_ISSET(s, &read_fds)){
-            socklen_t addr4_len = sizeof(addr4);
-            int client_socket = accept(s, (struct sockaddr *)&addr4, &addr4_len);
+            struct sockaddr_storage client_addr;
+            socklen_t client_len = sizeof(client_addr);
+            int client_socket = accept(s, (struct sockaddr*)&client_addr, &client_len);
 
             if(client_socket == -1){
                 logexit("accept sensor");
             }
-            
+
             if(clientes >= MAX_CLIENTES){
-                char error_msg[BUFFER_SIZE];
-                memset(error_msg, 0, sizeof(error_msg));
+                char error_msg[BUFFER_SIZE] = {0};
                 error_msg[0] = (unsigned char)ERROR;
                 error_msg[1] = '9'; 
                 send(client_socket, error_msg, sizeof(error_msg), 0);
@@ -136,41 +270,59 @@ void cliente_servidor(const char *ip, const char *porta_cliente){
                 continue;
             }
 
-            
-
-            char requisicao[BUFFER_SIZE];
-            memset(requisicao, 0, sizeof(requisicao));
+            char requisicao[BUFFER_SIZE] = {0};
             recv(client_socket, requisicao, sizeof(requisicao), 0);
 
             if(requisicao[0] == REQ_CONNSEN){
-                if(tipo_servidor == 61000){
-                    sensores[clientes-1]->local = rand() % 10; 
-                    printf("Client %s added (%d)\n", sensores[clientes]->id_cliente, sensores[clientes]->local);
-                }else{
-                    sensores[clientes] = malloc(sizeof(sensor));
-                    sensores[clientes]->socket = client_socket;
-                    sensores[clientes]->risco = rand() % 2;
-                    sensores[clientes]->local = (rand() % 10) + 1;
-                    strcpy(sensores[clientes]->id_cliente, &requisicao[1]);
-                
-                    char resposta[BUFFER_SIZE];
-                    memset(resposta, 0, sizeof(resposta));
-                    resposta[0] = RES_CONNSEN;
-                    strcpy(&resposta[1], sensores[clientes]->id_cliente); // ID começa na posição 1
-
-                    send(client_socket, resposta, sizeof(resposta), 0);
-
-                    printf("Client %s added (%d)\n", sensores[clientes]->id_cliente, sensores[clientes]->local);
-                    clientes++;
+                sensor *novo = malloc(sizeof(sensor));
+                if (!novo) {
+                    perror("malloc");
+                    close(client_socket);
+                    continue;
                 }
 
+                novo->socket = client_socket;
+                strcpy(novo->id_cliente, &requisicao[1]);
+
+                if (tipo_servidor == 60000){
+                    novo->local = rand() % 10 + 1;
+                    printf("Client %s added (%d)\n", novo->id_cliente, novo->local);
+                } else {
+                    novo->risco = rand() % 2;
+                    printf("Client %s added (%d)\n", novo->id_cliente, novo->risco);
+                }
+
+                char resposta[BUFFER_SIZE] = {0};
+                resposta[0] = RES_CONNSEN;
+                strcpy(&resposta[1], novo->id_cliente);
+                send(client_socket, resposta, sizeof(resposta), 0);
+
+                sensores[clientes++] = novo;
             }
         }
-        
+
+        // dados de sensores conectados
+        for(int i = 0; i < clientes; i++){
+            if(FD_ISSET(sensores[i]->socket, &read_fds)){
+                char requisicao_cliente[BUFFER_SIZE] = {0};
+                int bytes = recv(sensores[i]->socket, requisicao_cliente, sizeof(requisicao_cliente), 0);
+
+                if(bytes <= 0){
+                    printf("Sensor %s desconectado.\n", sensores[i]->id_cliente);
+                    close(sensores[i]->socket);
+                    free(sensores[i]);
+                    sensores[i] = sensores[--clientes]; // substitui pelo último
+                    i--;
+                    continue;
+                }
+                requisicoes(requisicao_cliente, i);
+            }
+        }
     }
-
-
 }
+
+
+
 
 void peer2peer(const char *ip, const char *porta_peer){
     struct sockaddr_in peer;
@@ -353,125 +505,8 @@ void comunicacao_peers(char *requisicao_peer){
     }
 }
 
-void requisicoes(char *requisicao_cliente, int i){
-    if((unsigned char)requisicao_cliente[0] == REQ_SENSSTATUS){
-        int status = -1;
-        if(verify(&requisicao_cliente[1])){
-            for(int j = 0; j < clientes; j++){
-                if(strcmp(sensores[j]->id_cliente, &requisicao_cliente[1]) == 0){
-                    status = sensores[j]->risco;
-                    break;
-                }
-            }
-        }
 
-        switch (status){
-        char resposta[BUFFER_SIZE];
 
-        case 0: //nao tem risco
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = OK;
-            send(sensores[i] -> socket, resposta, sizeof(resposta), 0);
-            break;
-        case 1: //caso de risco
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = REQ_CHECKALERT;
-            strcpy(&resposta[1], &requisicao_cliente[1]);
-            send(socket_1, resposta, sizeof(resposta), 0);
-            
-            //espera a resposta do servidor SL
-            memset(resposta, 0, sizeof(resposta));
-            recv(s, resposta, sizeof(resposta), 0);
-            
-            if((unsigned char)resposta[0] == RES_CHECKALERT){
-                resposta[0] = RES_SENSSTATUS;
-                //envia pra resposta para o cliente
-                send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-            }else if((unsigned char)resposta[0] == ERROR){
-                send(s, resposta, sizeof(resposta), 0);
-            }
-            break;
-
-        case -1: //nao encontrado
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = (unsigned char)ERROR;
-            strcpy(&resposta[1], "10"); 
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-            break;
-        }
-    }else if((unsigned char)requisicao_cliente[0] == REQ_LOCLIST){
-
-        char list[BUFFER_SIZE];
-        for(int i = 0; i < clientes; i++){
-            if(sensores[i]->local == requisicao_cliente[1]){
-                if(strlen(list) > 0){
-                    strcat(list, ", ");
-                }
-                strcat(list, sensores[i]->id_cliente);
-            }
-        }
-        if(strlen(list) == 0){
-            char resposta[BUFFER_SIZE];
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = (unsigned char)ERROR;
-            strcpy(&resposta[1], "11");  
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-        }else{
-            char resposta[BUFFER_SIZE];
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = RES_LOCLIST;
-            strcpy(&resposta[1], list);
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-        }
-    }else if((unsigned char)requisicao_cliente[0] == REQ_SENSLOC){
-        int found = verify(&requisicao_cliente[1]);
-
-        if(found == 1){
-            char resposta[BUFFER_SIZE];
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = RES_SENSLOC;
-            char buffer[16];
-            printf(buffer, "%d", sensores[i]->local);
-            strcpy(&resposta[1], buffer);
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-        
-        }else{
-            char resposta[BUFFER_SIZE];
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = (unsigned char) ERROR;
-            strcpy(&resposta[1], "10"); 
-
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-        }
-    }else if((unsigned char)requisicao_cliente[0] == REQ_DISCSEN){
-        int found = verify(&requisicao_cliente[1]);
-
-        if(found == 0){
-            char resposta[BUFFER_SIZE];     
-            resposta[0] = (unsigned char)ERROR;
-            resposta[1] = 10;
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-        }else{
-            char resposta[BUFFER_SIZE];
-            memset(resposta, 0, sizeof(resposta));
-            resposta[0] = OK;
-            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
-
-            if(tipo_servidor == 61000){
-                printf("Client %s removed %d\n", sensores[i]->id_cliente, sensores[i]->risco);
-
-            }else{
-                printf("Client %s removed (Loc %d)\n", sensores[i]->id_cliente, sensores[i]->local);
-            }
-            
-            close(sensores[i]->socket);
-            sensores[i]->socket = -1; 
-            clientes--;
-            sensores[i] = sensores[clientes];
-        }
-    }
-
-}
 
 int main(int argc, char **argv){
     srand(time(NULL));
@@ -492,10 +527,12 @@ int main(int argc, char **argv){
     // printf("Porta cliente: %s\n", porta_cliente);
     // printf("Porta peer: %s\n", porta_peer);
 
-    peer2peer(ip, porta_peer);
-    cliente_servidor(ip, porta_cliente);
 
     tipo_servidor = atoi(porta_cliente);
+    // printf("tipo servidor: %d\n", tipo_servidor);
+
+    peer2peer(ip, porta_peer);
+    cliente_servidor(ip, porta_cliente);
 
 
     fd_set read_fds;
@@ -528,7 +565,7 @@ int main(int argc, char **argv){
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
 
-            if(strcmp(input, "kill\n") == 0){
+            if(strcmp(input, "kill") == 0){
                 printf("Succesful disconnect");
                 printf("Peer %s disconnected\n", PidSj);
                 close(socket_1);
@@ -546,16 +583,7 @@ int main(int argc, char **argv){
             comunicacao_peers(requisicao_peer);
         }
 
-        for(int i = 0; i < MAX_CLIENTES; i++){
-            if(FD_ISSET (sensores[i]->socket, &read_fds)){
-                char requisicao_cliente[BUFFER_SIZE];
-                memset(requisicao_cliente, 0, sizeof(requisicao_cliente));
-                recv(sensores[i]->socket, requisicao_cliente, sizeof(requisicao_cliente), 0);
-
-                requisicoes(requisicao_cliente, i);
-
-            }
-        }
+        
 
     }
     return 0;

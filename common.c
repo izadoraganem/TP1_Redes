@@ -80,8 +80,8 @@ void gera_id(char id[11]){
 }
 
 int get_command_code(const char* buffer){
-    if(strcmp(buffer, "Check failure") == 0) return 1;
-    if(strncmp(buffer, "diagnose", 8) == 0) return 2;
-     if(strncmp(buffer, "locate", 6) == 0) return 3;
+    if(strcmp(buffer, "Check failure\n") == 0) return 1;
+    if(strncmp(buffer, "diagnose\n", 8) == 0) return 2;
+    if(strncmp(buffer, "locate\n", 6) == 0) return 3;
     return 0; 
 }
