@@ -16,40 +16,58 @@
 #define REQ_CONNPEER 20
 #define RES_CONNPEER 21
 #define REQ_DISCPEER 22
+#define REQ_CONNSEN 23
+#define RES_CONNSEN 24
 #define REQ_DISCSEN 25
 
 
+#define REQ_CHECKALERT 36
+#define RES_CHECKALERT 37
+#define REQ_SENSLOC 38
+#define RES_SENSLOC 39
+#define REQ_SENSSTATUS 40
+#define RES_SENSSTATUS 41
+#define REQ_LOCLIST 42
+#define RES_LOCLIST 43
 #define ERROR 255
 #define OK 0
 
-int connected = 0;
+int clientes = 0;
 int peers_connected = 0;
 int s;
 int socket_1;
 int listen_s;
 char PidSi[11];
 char PidSj[11];
-struct sockaddr_in addr_client; 
-int p2p_mode = 0; 
-int peer_accepted = 0; 
-struct sockaddr_in peer;
-socklen_t peer_len = sizeof(peer);
+int tipo_servidor;
 
-void usage(const char *progname){
-    fprintf(stderr, "Uso: %s <ip> <porta_cliente> <porta_peer>\n", progname);
-    fprintf(stderr, "Exemplo: %s 127.0.0.1 6000 6100\n", progname);
-    exit(EXIT_FAILURE);
-}
+typedef struct{
+    int socket;         
+    int risco;        
+    char id_cliente[11];
+    int local;
 
-void gera_id_peer(char id_peer[11]){
-    for (int i = 0; i < 10; i++){
-        id_peer[i] = '0' + (rand() % 10); 
+} sensor;
+
+sensor* sensores[MAX_CLIENTES];
+
+// struct sockaddr_in peer;
+// socklen_t peer_len = sizeof(peer);
+
+int verify(const char *id){
+    for(int i = 0; i < clientes; i++){
+        if(strcmp(sensores[i]->id_cliente, id) == 0){
+            return 1; 
+        }
     }
-    id_peer[10] = '\0';
+    return 0; 
 }
+
 
 void cliente_servidor(const char *ip, const char *porta_cliente){
     struct sockaddr_in addr4; //IPV4
+    fd_set read_fds;
+    int max_fd;
 
     //inicializa o ipv4
     if(addrparse(ip, porta_cliente, &addr4) != 0){
@@ -75,8 +93,84 @@ void cliente_servidor(const char *ip, const char *porta_cliente){
     if(listen(s, MAX_CLIENTES) != 0){
         logexit("listen");
     }
-}
 
+    while(1){
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        FD_SET(s, &read_fds);
+
+        max_fd = s > STDIN_FILENO ? s : STDIN_FILENO;
+
+        if(select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0){
+            logexit("select");
+        }
+
+        //pode dar kill enquanto escuta
+        if(FD_ISSET(STDIN_FILENO, &read_fds)){
+            char buffer[BUFFER_SIZE];
+            memset(buffer, 0, sizeof(buffer));
+            fgets(buffer, sizeof(buffer), stdin);
+
+            buffer[strcspn(buffer, "\n")] = 0;
+            if(strcmp(buffer, "kill") == 0){
+                close(s);
+                exit(0);
+            }
+        }
+
+        if(FD_ISSET(s, &read_fds)){
+            socklen_t addr4_len = sizeof(addr4);
+            int client_socket = accept(s, (struct sockaddr *)&addr4, &addr4_len);
+
+            if(client_socket == -1){
+                logexit("accept sensor");
+            }
+            
+            if(clientes >= MAX_CLIENTES){
+                char error_msg[BUFFER_SIZE];
+                memset(error_msg, 0, sizeof(error_msg));
+                error_msg[0] = (unsigned char)ERROR;
+                error_msg[1] = '9'; 
+                send(client_socket, error_msg, sizeof(error_msg), 0);
+                close(client_socket);
+                continue;
+            }
+
+            
+
+            char requisicao[BUFFER_SIZE];
+            memset(requisicao, 0, sizeof(requisicao));
+            recv(client_socket, requisicao, sizeof(requisicao), 0);
+
+            if(requisicao[0] == REQ_CONNSEN){
+                if(tipo_servidor == 61000){
+                    sensores[clientes-1]->local = rand() % 10; 
+                    printf("Client %s added (%d)\n", sensores[clientes]->id_cliente, sensores[clientes]->local);
+                }else{
+                    sensores[clientes] = malloc(sizeof(sensor));
+                    sensores[clientes]->socket = client_socket;
+                    sensores[clientes]->risco = rand() % 2;
+                    sensores[clientes]->local = (rand() % 10) + 1;
+                    strcpy(sensores[clientes]->id_cliente, &requisicao[1]);
+                
+                    char resposta[BUFFER_SIZE];
+                    memset(resposta, 0, sizeof(resposta));
+                    resposta[0] = RES_CONNSEN;
+                    strcpy(&resposta[1], sensores[clientes]->id_cliente); // ID começa na posição 1
+
+                    send(client_socket, resposta, sizeof(resposta), 0);
+
+                    printf("Client %s added (%d)\n", sensores[clientes]->id_cliente, sensores[clientes]->local);
+                    clientes++;
+                }
+
+            }
+        }
+        
+    }
+
+
+}
 
 void peer2peer(const char *ip, const char *porta_peer){
     struct sockaddr_in peer;
@@ -133,7 +227,6 @@ void peer2peer(const char *ip, const char *porta_peer){
             }
 
             //pode dar kill enquanto escuta
-
             if(FD_ISSET(STDIN_FILENO, &read_fds)){
                 char buffer[BUFFER_SIZE];
                 memset(buffer, 0, sizeof(buffer));
@@ -141,7 +234,8 @@ void peer2peer(const char *ip, const char *porta_peer){
 
                 buffer[strcspn(buffer, "\n")] = 0;
                 if(strcmp(buffer, "kill") == 0){
-                    printf("Killing server...\n");
+                    printf("Succesful disconnect");
+                    printf("Peer %s disconnected\n", PidSi);
                     close(socket_1);
                     exit(0);
                 }
@@ -174,85 +268,210 @@ void peer2peer(const char *ip, const char *porta_peer){
             recv(conn_fd, req_listenpeer, sizeof(req_listenpeer), 0);
 
             if(req_listenpeer[0] == REQ_CONNPEER){
-                strcpy(PidSi, &req_listenpeer[1]);
-                printf("New Peer ID: %s\n", PidSi);
+                strcpy(PidSj, &req_listenpeer[1]);
+                printf("Peer %s connected\n", PidSj);
 
-                //gera id do sj e envia para ele
-                gera_id_peer(PidSj);
-                char id_Sj[BUFFER_SIZE] ;
-                id_Sj[0] = RES_CONNPEER;
-                strcpy(&id_Sj[1], PidSj);
-                send(conn_fd, id_Sj, sizeof(id_Sj), 0);
+                gera_id(PidSi);
+                printf("New Peer ID: %s\n", PidSi);
+                char id_Si[BUFFER_SIZE];
+                id_Si[0] = RES_CONNPEER;
+                strcpy(&id_Si[1], PidSi);
+                send(conn_fd, id_Si, sizeof(id_Si), 0);
                 break;
             }
         }
     }   
     }else{
-        fd_set fds;
-        struct timeval timeout;
-        FD_ZERO(&fds);
-        FD_SET(socket_1, &fds);
-
-        printf("Conexão estabelecida com o peer.\n");
-        
-        gera_id_peer(PidSi);
-        printf("Peer %s connected\n", PidSi);
-
-        char requisicao[BUFFER_SIZE];
-        requisicao[0] = REQ_CONNPEER;
-        strcpy(&requisicao[1], PidSi);
-        send(socket_1, requisicao, sizeof(requisicao), 0);
-
-        //recebe resposta com id do sj
-        memset(requisicao, 0, sizeof(requisicao));
-        recv(socket_1, requisicao, sizeof(requisicao), 0);
-
-        if((unsigned char)requisicao[0] == ERROR){
+        if(peers_connected){
             logexit("Peer limit exceeded");
         }else{
+            gera_id(PidSj);
+            
+            char requisicao[BUFFER_SIZE];
+            requisicao[0] = REQ_CONNPEER;
+            strcpy(&requisicao[1], PidSj);
+            send(socket_1, requisicao, sizeof(requisicao), 0);
+
+            memset(requisicao, 0, sizeof(requisicao));
+            recv(socket_1, requisicao, sizeof(requisicao), 0);
             if(requisicao[0] == RES_CONNPEER){
-            strcpy(PidSj, &requisicao[1]);
             printf("New Peer ID: %s\n", PidSj);
-            }   
-        }
-    }  
+            strcpy(PidSi, &requisicao[1]);
+            printf("Peer %s connected\n", PidSi);
+            } 
+        }          
+    }   
 }   
 
-void kill_peer2peer(){
-    if (socket_1 != -1){
+void comunicacao_peers(char *requisicao_peer){
+    if((unsigned char)requisicao_peer[0] == ERROR){
+        if((unsigned char)requisicao_peer[1] == 'A'){
+            printf("Sensor not found\n");
+            exit(0);
+        }else if((unsigned char)requisicao_peer[1] == '2'){
+            printf("Peer not found\n");
+            exit(0);
+        }
 
-    char kill_msg[BUFFER_SIZE];
-    kill_msg[0] = (unsigned char) REQ_DISCPEER;
-    strcpy(&kill_msg[1], PidSi);  
-
-    if(send(socket_1, kill_msg, sizeof(kill_msg), 0) == -1){
-        logexit("send kill_msg");
-    }
-
-    char resposta_kill[BUFFER_SIZE];
-    memset(resposta_kill, 0, sizeof(resposta_kill));
-
-    if(recv(socket_1, resposta_kill, sizeof(resposta_kill), 0) == -1){
-        logexit("recv kill_msg");
-    }
-
-    if((unsigned char)resposta_kill[0] == ERROR){
-        printf("Peer not found\n");
-    }
-    else if((unsigned char)resposta_kill[0] == OK){
-        printf("Peer %s disconnected\n", PidSj);
-    }
-
-        close(socket_1);
-        socket_1 = -1;
-
-        if(listen_s != -1){
-            close(listen_s);  
-            listen_s = -1;
+    }else if((unsigned char)requisicao_peer[0] == REQ_CHECKALERT){
+        char temp_id[16];
+        char buffer[16];
+        strcpy(temp_id, &requisicao_peer[1]);
+        if(verify(temp_id)){
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = RES_CHECKALERT;
+            for(int i = 0; i < MAX_CLIENTES; i++){
+                if (strcmp(sensores[i]->id_cliente, temp_id) == 0)
+                    sprintf(buffer, "%d", sensores[i]->local);
+                    strcpy(&resposta[1], buffer);
+            }
+            send(socket_1, resposta, sizeof(resposta), 0);
+        }else{
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = (unsigned char)ERROR;
+            resposta[1] = 'A'; // Sensor not found
+            send(socket_1, resposta, sizeof(resposta), 0);
+        }
+    }else if((unsigned char) requisicao_peer[0] == REQ_DISCPEER){
+        if(strcmp(&requisicao_peer[1], PidSi) == 0){
+            printf("Peer %s disconnected\n", PidSi);
+            close(socket_1);
+            exit(0);
+        }else if(strcmp(&requisicao_peer[1], PidSj) == 0){
+            printf("Peer %s disconnected\n", PidSj);
+            close(socket_1);
+            exit(0);
+        }else{
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = (unsigned char)ERROR;
+            resposta[1] = '2';
+            send(socket_1, resposta, sizeof(resposta), 0);
         }
     }
 }
 
+void requisicoes(char *requisicao_cliente, int i){
+    if((unsigned char)requisicao_cliente[0] == REQ_SENSSTATUS){
+        int status = -1;
+        if(verify(&requisicao_cliente[1])){
+            for(int j = 0; j < clientes; j++){
+                if(strcmp(sensores[j]->id_cliente, &requisicao_cliente[1]) == 0){
+                    status = sensores[j]->risco;
+                    break;
+                }
+            }
+        }
+
+        switch (status){
+        char resposta[BUFFER_SIZE];
+
+        case 0: //nao tem risco
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = OK;
+            send(sensores[i] -> socket, resposta, sizeof(resposta), 0);
+            break;
+        case 1: //caso de risco
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = REQ_CHECKALERT;
+            strcpy(&resposta[1], &requisicao_cliente[1]);
+            send(socket_1, resposta, sizeof(resposta), 0);
+            
+            //espera a resposta do servidor SL
+            memset(resposta, 0, sizeof(resposta));
+            recv(s, resposta, sizeof(resposta), 0);
+            
+            if((unsigned char)resposta[0] == RES_CHECKALERT){
+                resposta[0] = RES_SENSSTATUS;
+                //envia pra resposta para o cliente
+                send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+            }else if((unsigned char)resposta[0] == ERROR){
+                send(s, resposta, sizeof(resposta), 0);
+            }
+            break;
+
+        case -1: //nao encontrado
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = (unsigned char)ERROR;
+            strcpy(&resposta[1], "10"); 
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+            break;
+        }
+    }else if((unsigned char)requisicao_cliente[0] == REQ_LOCLIST){
+
+        char list[BUFFER_SIZE];
+        for(int i = 0; i < clientes; i++){
+            if(sensores[i]->local == requisicao_cliente[1]){
+                if(strlen(list) > 0){
+                    strcat(list, ", ");
+                }
+                strcat(list, sensores[i]->id_cliente);
+            }
+        }
+        if(strlen(list) == 0){
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = (unsigned char)ERROR;
+            strcpy(&resposta[1], "11");  
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+        }else{
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = RES_LOCLIST;
+            strcpy(&resposta[1], list);
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+        }
+    }else if((unsigned char)requisicao_cliente[0] == REQ_SENSLOC){
+        int found = verify(&requisicao_cliente[1]);
+
+        if(found == 1){
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = RES_SENSLOC;
+            char buffer[16];
+            printf(buffer, "%d", sensores[i]->local);
+            strcpy(&resposta[1], buffer);
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+        
+        }else{
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = (unsigned char) ERROR;
+            strcpy(&resposta[1], "10"); 
+
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+        }
+    }else if((unsigned char)requisicao_cliente[0] == REQ_DISCSEN){
+        int found = verify(&requisicao_cliente[1]);
+
+        if(found == 0){
+            char resposta[BUFFER_SIZE];     
+            resposta[0] = (unsigned char)ERROR;
+            resposta[1] = 10;
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+        }else{
+            char resposta[BUFFER_SIZE];
+            memset(resposta, 0, sizeof(resposta));
+            resposta[0] = OK;
+            send(sensores[i]->socket, resposta, sizeof(resposta), 0);
+
+            if(tipo_servidor == 61000){
+                printf("Client %s removed %d\n", sensores[i]->id_cliente, sensores[i]->risco);
+
+            }else{
+                printf("Client %s removed (Loc %d)\n", sensores[i]->id_cliente, sensores[i]->local);
+            }
+            
+            close(sensores[i]->socket);
+            sensores[i]->socket = -1; 
+            clientes--;
+            sensores[i] = sensores[clientes];
+        }
+    }
+
+}
 
 int main(int argc, char **argv){
     srand(time(NULL));
@@ -263,8 +482,8 @@ int main(int argc, char **argv){
     const char *ip = argv[1];
     const char *porta_peer = argv[2];
     const char *porta_cliente = argv[3];
-    
 
+    
     if (atoi(porta_cliente) <= 0 || atoi(porta_peer) <= 0){
         usage(argv[0]);
     }
@@ -273,9 +492,11 @@ int main(int argc, char **argv){
     // printf("Porta cliente: %s\n", porta_cliente);
     // printf("Porta peer: %s\n", porta_peer);
 
-    // cliente_servidor(ip, porta_cliente);
-
     peer2peer(ip, porta_peer);
+    cliente_servidor(ip, porta_cliente);
+
+    tipo_servidor = atoi(porta_cliente);
+
 
     fd_set read_fds;
     int max_fd;
@@ -292,9 +513,9 @@ int main(int argc, char **argv){
         max_fd = max_fd > socket_1 ? max_fd : socket_1;
         max_fd = max_fd > listen_s ? max_fd : listen_s;
 
-        // for(int i = 0; i < connected; i++){
-        //     FD_SET(sensores[i]->sock, &read_fds);
-        // }
+        for(int i = 0; i < clientes; i++){
+            FD_SET(sensores[i]->socket, &read_fds);
+        }
 
         if(select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1){
             logexit("select");
@@ -308,53 +529,34 @@ int main(int argc, char **argv){
             input[strcspn(input, "\n")] = 0;
 
             if(strcmp(input, "kill\n") == 0){
-                kill_peer2peer();
+                printf("Succesful disconnect");
+                printf("Peer %s disconnected\n", PidSj);
+                close(socket_1);
+                printf("Peer %s disconnected\n", PidSi);
+                close(listen_s);
+                return 0;
             }
         }
 
-        if(FD_ISSET(listen_s, &read_fds) && p2p_mode == 0){
-            int new_peer = accept(listen_s, (struct sockaddr *)&peer, &peer_len);
-            if(new_peer == -1){
-                logexit("accept peer");
+        if(FD_ISSET(socket_1, &read_fds)){
+            char requisicao_peer[BUFFER_SIZE];
+            memset(requisicao_peer, 0, sizeof(requisicao_peer));
+            recv(socket_1, requisicao_peer, sizeof(requisicao_peer), 0);
+
+            comunicacao_peers(requisicao_peer);
+        }
+
+        for(int i = 0; i < MAX_CLIENTES; i++){
+            if(FD_ISSET (sensores[i]->socket, &read_fds)){
+                char requisicao_cliente[BUFFER_SIZE];
+                memset(requisicao_cliente, 0, sizeof(requisicao_cliente));
+                recv(sensores[i]->socket, requisicao_cliente, sizeof(requisicao_cliente), 0);
+
+                requisicoes(requisicao_cliente, i);
+
             }
-        
-        socket_1 = new_peer;
-
-        char req_peer[BUFFER_SIZE];
-        recv(socket_1, req_peer, sizeof(req_peer), 0);
-
-        strcpy(PidSi, &req_peer[1]);
-        peers_connected++;
-
-        gera_id(PidSj);
-        printf("Peer %s connected\n", PidSj);
-
-        char id_Sj[BUFFER_SIZE];
-        id_Sj[0] = RES_CONNPEER;
-        strcpy(&id_Sj[1], PidSj);
-        send(socket_1, id_Sj, sizeof(id_Sj), 0);
-
-        p2p_mode = 0; // servidor aceitando conexão
-    }
-
-
-        if(FD_ISSET(socket_1, &read_fds) && p2p_mode == 1){
-        // Recebe RES_CONNPEER
-        char resposta[BUFFER_SIZE];
-        if(recv(socket_1, resposta, sizeof(resposta), 0) <= 0){
-            logexit("recv peer");
         }
 
-        if(peers_connected > 1){
-            printf("New Peer ID: %s\n", &resposta[1]);
-        } else {
-            printf("Peer limit exceeded\n");
-        }
     }
-
-    }
-    close(s);
-    close(socket_1);
-    close(listen_s);
     return 0;
 }

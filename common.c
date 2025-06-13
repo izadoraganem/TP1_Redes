@@ -14,6 +14,12 @@ void logexit(const char *msg){
     exit(EXIT_FAILURE);
 }
 
+void usage(const char *progname){
+    fprintf(stderr, "Uso: %s <ip> <porta_cliente> <porta_peer>\n", progname);
+    fprintf(stderr, "Exemplo: %s 127.0.0.1 6000 6100\n", progname);
+    exit(EXIT_FAILURE);
+}
+
 //inicializa endereço IPV4 
 int addrparse(const char *ip_str, const char *port_str, struct sockaddr_in *addr){
     if(ip_str == NULL || port_str == NULL){
@@ -71,4 +77,11 @@ void gera_id(char id[11]){
         id[i] = '0' + (rand() % 10); 
     }
     id[10] = '\0';
+}
+
+int get_command_code(const char* buffer){
+    if(strcmp(buffer, "Check failure") == 0) return 1;
+    if(strncmp(buffer, "diagnose", 8) == 0) return 2;
+     if(strncmp(buffer, "locate", 6) == 0) return 3;
+    return 0; 
 }
